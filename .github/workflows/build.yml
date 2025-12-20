@@ -1,0 +1,41 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target (e.g. mediatek/filogic)'
+        required: true
+        default: 'mediatek/filogic'
+      device:
+        description: 'Device (e.g. xiaomi_redmi-router-ax6000-ubi)'
+        required: true
+        default: 'xiaomi_redmi-router-ax6000-ubi'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+            gettext git java-propose-classpath libelf-dev libncurses5-dev \
+            libncursesw5-dev libssl-dev python python2.7-dev unzip wget \
+            python3-distutils python3-setuptools python3-dev rsync source-highlight \
+            lz4 zstd file wget
+      - name: Build firmware
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${{ github.event.inputs.device }}=y" > .config
+          echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
+          make defconfig
+          make -j$(nproc) V=s
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ github.event.inputs.device }}-ubi
+          path: bin/targets/mediatek/filogic/*${{ github.event.inputs.device }}*.ubi
