@@ -16,7 +16,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Install packages
         run: |
           sudo apt-get update
@@ -35,7 +35,7 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
           make defconfig
           make -j$(nproc) V=s
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.inputs.device }}-ubi
           path: bin/targets/mediatek/filogic/*${{ github.event.inputs.device }}*.ubi
