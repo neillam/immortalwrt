@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
 
 env:
+  # 推荐使用 hanwckf 分支以获得最佳闭源驱动支持
   REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
   REPO_BRANCH: openwrt-21.02
 
@@ -36,24 +37,25 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 自动定位 ID 并生成配置 (关键修正)
+      - name: 生成 .config 配置文件
         run: |
           cd openwrt
-          # 自动在源码中查找红米 AX6000 的 ID
-          REAL_ID=$(grep "Device/" target/linux/mediatek/image/filogic.mk | grep -i "ax6000" | head -n 1 | cut -d'/' -f2)
-          echo "检测到的设备 ID 为: $REAL_ID"
-          
+          # 1. 强制写入目标 ID (基于你发现的 DTS 文件名)
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_$REAL_ID=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
           
-          # 闭源驱动与基础组件
+          # 2. 写入闭源 WiFi 驱动核心组件
           echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
+          
+          # 3. 写入界面与中文包
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
           
+          # 补全所有依赖
           make defconfig
 
       - name: 预下载
@@ -61,24 +63,24 @@ jobs:
           cd openwrt
           make download -j8
 
-      - name: 编译
+      - name: 编译固件 (耗时约 1-2 小时)
         run: |
           cd openwrt
           make -j$(nproc) || make -j1 V=s
 
-      - name: 提取 UBI 固件
+      - name: 提取 UBI 产物 (针对 NAND 闪存布局)
         if: always()
         run: |
           mkdir -p ./artifact/
-          # 专门寻找包含 ax6000 的 ubi 文件
+          # 关键：寻找包含 ax6000 的 ubi 文件，这就是原厂布局所需的镜像
           find openwrt/bin/targets/ -type f -name "*ax6000*.ubi" -exec cp {} ./artifact/ \;
-          # 如果没找到 ubi，就把所有 bin 也抓出来备查
-          find openwrt/bin/targets/ -type f -name "*ax6000*.bin" -exec cp {} ./artifact/ \;
+          # 同时保留 sysupgrade.bin 备用
+          find openwrt/bin/targets/ -type f -name "*ax6000*sysupgrade.bin" -exec cp {} ./artifact/ \;
           ls -R ./artifact/
 
       - name: 上传产物
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AX6000-Correct-NAND-Firmware
+          name: AX6000-ClosedSource-NAND-Result
           path: ./artifact/
