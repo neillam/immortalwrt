@@ -1,7 +1,11 @@
-name: Build AX6000 Final Solution
+name: Build AX6000 Final NAND Version
 
 on:
   workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
+  REPO_BRANCH: openwrt-21.02
 
 jobs:
   build:
@@ -27,58 +31,54 @@ jobs:
 
       - name: 克隆源码
         run: |
-          # 使用 hanwckf 的 21.02 分支，这是闭源驱动最成熟的版本
-          git clone --depth 1 https://github.com/hanwckf/immortalwrt-mt798x -b openwrt-21.02 openwrt
-
-      - name: 更新 Feeds
-        working-directory: ./openwrt
-        run: |
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+          cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 写入 .config 配置文件
-        working-directory: ./openwrt
+      - name: 自动定位 ID 并生成配置 (关键修正)
         run: |
-          # 强制写入最简核心配置
+          cd openwrt
+          # 自动在源码中查找红米 AX6000 的 ID
+          REAL_ID=$(grep "Device/" target/linux/mediatek/image/filogic.mk | grep -i "ax6000" | head -n 1 | cut -d'/' -f2)
+          echo "检测到的设备 ID 为: $REAL_ID"
+          
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_$REAL_ID=y" >> .config
           
-          # 闭源无线驱动
+          # 闭源驱动与基础组件
           echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
-          
-          # 中文界面与加速
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
           
           make defconfig
 
-      - name: 预下载依赖包
-        working-directory: ./openwrt
+      - name: 预下载
         run: |
+          cd openwrt
           make download -j8
-          find dl -size -1k -exec rm -f {} \;
 
-      - name: 编译固件
-        working-directory: ./openwrt
+      - name: 编译
         run: |
+          cd openwrt
           make -j$(nproc) || make -j1 V=s
 
-      - name: 终极产物搜寻 (地毯式抓取)
-        if: always() # 即使编译中间报错也执行
+      - name: 提取 UBI 固件
+        if: always()
         run: |
           mkdir -p ./artifact/
-          # 扫描所有生成的包含 ax6000 的文件，不限目录
-          find openwrt/bin/ -type f -name "*ax6000*" -exec cp {} ./artifact/ \;
-          echo "--- 搜寻到的所有固件产物如下 ---"
+          # 专门寻找包含 ax6000 的 ubi 文件
+          find openwrt/bin/targets/ -type f -name "*ax6000*.ubi" -exec cp {} ./artifact/ \;
+          # 如果没找到 ubi，就把所有 bin 也抓出来备查
+          find openwrt/bin/targets/ -type f -name "*ax6000*.bin" -exec cp {} ./artifact/ \;
           ls -R ./artifact/
 
       - name: 上传产物
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AX6000-ClosedSource-Result
+          name: AX6000-Correct-NAND-Firmware
           path: ./artifact/
