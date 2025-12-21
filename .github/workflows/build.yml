@@ -4,7 +4,7 @@ on:
   workflow_dispatch: # 手动点击运行
 
 env:
-  # 确保源码仓库支持闭源驱动，这里推荐使用 padavanonly 的分支
+  # 使用支持 6.6 内核和闭源驱动的优质源码库
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
   REPO_BRANCH: main
 
@@ -41,35 +41,33 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 生成并校验 .config 配置文件
+      - name: 生成 .config 配置文件
         run: |
           cd openwrt
-          # 写入针对 Stock 布局的准确配置
-          cat <<EOF > .config
-          CONFIG_TARGET_mediatek=y
-          CONFIG_TARGET_mediatek_filogic=y
-          # 关键修正：根据日志，必须使用 -stock 后缀
-          CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y
+          # 强制写入配置，确保没有行首空格
+          echo "CONFIG_TARGET_mediatek=y" > .config
+          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
           
-          # 闭源 WiFi 驱动核心包 (SDK 版)
-          CONFIG_PACKAGE_mtk-wifi-mt7986=y
-          CONFIG_PACKAGE_kmod-mt7986-firmware=y
-          CONFIG_PACKAGE_luci-app-mtkwifi=y
+          # 闭源 WiFi 驱动核心包
+          echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
           
-          # 中文界面与核心性能组件
-          CONFIG_PACKAGE_luci=y
-          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-          CONFIG_PACKAGE_kmod-mtk-offload=y
-          CONFIG_PACKAGE_curl=y
-          CONFIG_PACKAGE_htop=y
-          EOF
+          # 核心性能与中文组件
+          echo "CONFIG_PACKAGE_luci=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
+          echo "CONFIG_PACKAGE_curl=y" >> .config
+          echo "CONFIG_PACKAGE_htop=y" >> .config
           
-          # 补全依赖并生成最终配置
+          # 补全依赖
           make defconfig
           
-          # 最终安全校验
+          # 安全校验：确保 ID 被正确选中
           if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" .config; then
-            echo "错误：依然无法匹配到设备 ID，请检查源码分支是否包含该机型。"
+            echo "错误：设备 ID 匹配失败！请检查下方生成的实际配置："
+            grep "CONFIG_TARGET_mediatek_filogic_DEVICE" .config
             exit 1
           fi
 
@@ -82,13 +80,13 @@ jobs:
       - name: 编译固件 (耗时 1-3 小时)
         run: |
           cd openwrt
-          # 多线程编译，失败则转单线程输出详情
+          # 优先多线程，失败转单线程详情模式
           make -j$(nproc) || make -j1 V=s
 
       - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
-          name: Redmi-AX6000-Stock-Layout-ClosedSource
+          name: Redmi-AX6000-ClosedSource-Result
           path: |
             openwrt/bin/targets/mediatek/filogic/*.ubi
             openwrt/bin/targets/mediatek/filogic/*.bin
