@@ -1,4 +1,4 @@
-name: Build
+name: Build ImmortalWrt for AX6000
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         default: 'mediatek/filogic'
       device:
-        description: 'Device (e.g. xiaomi_redmi-router-ax6000-ubi)'
+        description: 'Device'
         required: true
         default: 'xiaomi_redmi-router-ax6000-ubi'
 
@@ -16,29 +16,65 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install packages
+      - name: Free Disk Space (关键：防止磁盘空间不足)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Install Compilation Packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential ccache ecj fastjar file g++ gawk gettext git \
-            java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev \
-            libssl-dev python3 python3-dev python3-setuptools unzip wget \
-            rsync source-highlight lz4 zstd file wget
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
+            file wget libelf-dev lz4 zstd ecj fastjar java-propose-classpath
+          sudo apt-get clean
 
-      - name: Build firmware
+      - name: Update & Install Feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${{ github.event.inputs.device }}=y" > .config
-          echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
-          make defconfig
-          make -j$(nproc) V=s
 
-      - uses: actions/upload-artifact@v4
+      - name: Generate Configuration
+        run: |
+          # 基础硬件配置
+          echo "CONFIG_TARGET_mediatek=y" > .config
+          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${{ github.event.inputs.device }}=y" >> .config
+          
+          # 闭源驱动核心包 (必须确保你的源码树里包含这些包)
+          echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
+          
+          # 建议增加：硬件加速 (Offloading)
+          echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
+          
+          # 补全依赖并生成最终配置
+          make defconfig
+
+      - name: Download Library (预下载，提高成功率)
+        run: |
+          make download -j8
+          find dl -size -1k -exec ls -l {} \;
+          find dl -size -1k -exec rm -f {} \;
+
+      - name: Build Firmware
+        run: |
+          echo "开始编译..."
+          # 第一次编译建议使用单线程或核心数+1，防止内存溢出导致 No space 错误误报
+          make -j$(nproc) || make -j1 V=s
+          echo "编译完成"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.device }}-ubi
-          path: bin/targets/mediatek/filogic/*${{ github.event.inputs.device }}*.ubi
+          name: ${{ github.event.inputs.device }}-firmware
+          path: bin/targets/mediatek/filogic/*.ubi
