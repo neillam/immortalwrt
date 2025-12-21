@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
 
 env:
-  # 推荐使用这个专门为 AX6000 优化的源码库
   REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
   REPO_BRANCH: openwrt-21.02
 
@@ -41,22 +40,15 @@ jobs:
       - name: 强制写入 .config 配置文件
         run: |
           cd openwrt
-          # 必须先顶格写入目标架构和子目标
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
-          
-          # 闭源无线驱动组件
           echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
-          
-          # 核心 Web 界面与中文
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
-          
-          # 暴力补全依赖
           make defconfig
 
       - name: 预下载依赖包
@@ -65,16 +57,22 @@ jobs:
           make download -j8
           find dl -size -1k -exec rm -f {} \;
 
-      - name: 编译固件 (耗时 1-2 小时)
+      - name: 编译固件
         run: |
           cd openwrt
-          # 即使报错也尝试继续，优先多线程
           make -j$(nproc) || make -j1 V=s
+
+      - name: 整理文件并上传 (关键修正)
+        run: |
+          # 创建一个临时文件夹存放所有产物
+          mkdir -p ./artifact/
+          # 递归搜索所有生成的 .bin 和 .ubi 文件并拷贝过来
+          find openwrt/bin/targets/ -type f -name "*ax6000*" -exec cp {} ./artifact/ \;
+          echo "以下是找到的固件产物："
+          ls -R ./artifact/
 
       - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
           name: AX6000-ClosedSource-Result
-          path: |
-            openwrt/bin/targets/mediatek/filogic/*.ubi
-            openwrt/bin/targets/mediatek/filogic/*.bin
+          path: ./artifact/
