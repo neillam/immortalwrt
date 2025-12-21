@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
 
 env:
+  # 使用 hanwckf 的稳定分支
   REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
   REPO_BRANCH: openwrt-21.02
 
@@ -43,12 +44,17 @@ jobs:
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
+          
+          # 闭源驱动插件
           echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
+          
+          # 基础组件
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
+          
           make defconfig
 
       - name: 预下载依赖包
@@ -60,15 +66,16 @@ jobs:
       - name: 编译固件
         run: |
           cd openwrt
+          # 只要内核和镜像合成有一步失败，这里理论上会报错
           make -j$(nproc) || make -j1 V=s
 
-      - name: 整理文件并上传 (关键修正)
+      - name: 整理并搜寻产物 (关键修正)
+        if: always() # 即使编译失败也尝试搜索，方便看报错产物
         run: |
-          # 创建一个临时文件夹存放所有产物
           mkdir -p ./artifact/
-          # 递归搜索所有生成的 .bin 和 .ubi 文件并拷贝过来
+          # 全局搜寻包含 ax6000 的文件并拷贝
           find openwrt/bin/targets/ -type f -name "*ax6000*" -exec cp {} ./artifact/ \;
-          echo "以下是找到的固件产物："
+          echo "--- 搜寻到的产物列表如下 ---"
           ls -R ./artifact/
 
       - name: 上传固件产物
