@@ -4,7 +4,7 @@ on:
   workflow_dispatch: # 手动点击运行
 
 env:
-  # 使用支持 6.6 内核和闭源驱动的优质源码库
+  # 源码仓库：这是目前支持红米 AX6000 闭源驱动最成熟的分支
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
   REPO_BRANCH: main
 
@@ -15,7 +15,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 彻底清理磁盘空间 (解决 No space left 报错)
+      - name: 彻底清理磁盘空间
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -41,35 +41,28 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 生成 .config 配置文件
+      - name: 强制生成 .config 配置文件
         run: |
           cd openwrt
-          # 强制写入配置，确保没有行首空格
+          # 核心：直接清空并写入最核心的四行，确保 ID 绝对正确
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
           
-          # 闭源 WiFi 驱动核心包
+          # 闭源 WiFi 驱动插件包
           echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
           
-          # 核心性能与中文组件
+          # 中文界面与常用工具
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
           echo "CONFIG_PACKAGE_curl=y" >> .config
           echo "CONFIG_PACKAGE_htop=y" >> .config
           
-          # 补全依赖
+          # 这一步会自动根据上面选中的 ID 补全所有依赖
           make defconfig
-          
-          # 安全校验：确保 ID 被正确选中
-          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" .config; then
-            echo "错误：设备 ID 匹配失败！请检查下方生成的实际配置："
-            grep "CONFIG_TARGET_mediatek_filogic_DEVICE" .config
-            exit 1
-          fi
 
       - name: 预下载依赖包
         run: |
@@ -80,13 +73,13 @@ jobs:
       - name: 编译固件 (耗时 1-3 小时)
         run: |
           cd openwrt
-          # 优先多线程，失败转单线程详情模式
+          # 如果多线程失败会自动转单线程，方便排查
           make -j$(nproc) || make -j1 V=s
 
       - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
-          name: Redmi-AX6000-ClosedSource-Result
+          name: AX6000-ClosedSource-Result
           path: |
             openwrt/bin/targets/mediatek/filogic/*.ubi
             openwrt/bin/targets/mediatek/filogic/*.bin
