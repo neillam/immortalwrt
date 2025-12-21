@@ -1,10 +1,10 @@
 name: Build AX6000 Closed-Source Firmware
 
 on:
-  workflow_dispatch: # 手动点击触发
+  workflow_dispatch: # 手动点击运行
 
 env:
-  # 如果您的源码仓库不是这个，请修改为实际的仓库地址
+  # 确保源码仓库支持闭源驱动，这里推荐使用 padavanonly 的分支
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
   REPO_BRANCH: main
 
@@ -15,7 +15,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 彻底清理磁盘空间
+      - name: 彻底清理磁盘空间 (解决 No space left 报错)
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -44,32 +44,32 @@ jobs:
       - name: 生成并校验 .config 配置文件
         run: |
           cd openwrt
-          # 写入您的专属配置
+          # 写入针对 Stock 布局的准确配置
           cat <<EOF > .config
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
-          # 确认使用带 -ubi 后缀的设备 ID
-          CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-ubi=y
+          # 关键修正：根据日志，必须使用 -stock 后缀
+          CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y
           
-          # 闭源 WiFi 驱动核心包
+          # 闭源 WiFi 驱动核心包 (SDK 版)
           CONFIG_PACKAGE_mtk-wifi-mt7986=y
           CONFIG_PACKAGE_kmod-mt7986-firmware=y
           CONFIG_PACKAGE_luci-app-mtkwifi=y
           
-          # 中文界面与基础组件
+          # 中文界面与核心性能组件
           CONFIG_PACKAGE_luci=y
           CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
           CONFIG_PACKAGE_kmod-mtk-offload=y
           CONFIG_PACKAGE_curl=y
+          CONFIG_PACKAGE_htop=y
           EOF
           
-          # 补全依赖
+          # 补全依赖并生成最终配置
           make defconfig
           
-          # 校验是否选中了正确目标，防止 Fallback 到 openwrt_one
-          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-ubi=y" .config; then
-            echo "错误：源码中未找到该设备 ID，当前选中目标如下："
-            grep "CONFIG_TARGET_mediatek_filogic_DEVICE" .config
+          # 最终安全校验
+          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" .config; then
+            echo "错误：依然无法匹配到设备 ID，请检查源码分支是否包含该机型。"
             exit 1
           fi
 
@@ -79,16 +79,16 @@ jobs:
           make download -j8
           find dl -size -1k -exec rm -f {} \;
 
-      - name: 编译固件
+      - name: 编译固件 (耗时 1-3 小时)
         run: |
           cd openwrt
-          # 优先使用多线程，失败则转单线程查看详情
+          # 多线程编译，失败则转单线程输出详情
           make -j$(nproc) || make -j1 V=s
 
       - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
-          name: Redmi-AX6000-Closed-Source-Firmware
+          name: Redmi-AX6000-Stock-Layout-ClosedSource
           path: |
             openwrt/bin/targets/mediatek/filogic/*.ubi
             openwrt/bin/targets/mediatek/filogic/*.bin
