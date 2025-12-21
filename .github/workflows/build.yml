@@ -1,4 +1,4 @@
-name: Build AX6000 Closed-Source Firmware
+name: Build AX6000 Final Solution
 
 on:
   workflow_dispatch:
@@ -25,9 +25,9 @@ jobs:
             file wget libelf-dev lz4 zstd
           sudo apt-get clean
 
-      - name: 克隆源码 (克隆到 openwrt 文件夹)
+      - name: 克隆源码
         run: |
-          # 这样不会因为当前目录非空而报错
+          # 使用 hanwckf 的 21.02 分支，这是闭源驱动最成熟的版本
           git clone --depth 1 https://github.com/hanwckf/immortalwrt-mt798x -b openwrt-21.02 openwrt
 
       - name: 更新 Feeds
@@ -39,17 +39,17 @@ jobs:
       - name: 写入 .config 配置文件
         working-directory: ./openwrt
         run: |
-          # 强制顶格写入正确的 ID
+          # 强制写入最简核心配置
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
           
-          # 闭源无线驱动插件包
+          # 闭源无线驱动
           echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
           
-          # 基础组件与中文
+          # 中文界面与加速
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
@@ -62,16 +62,23 @@ jobs:
           make download -j8
           find dl -size -1k -exec rm -f {} \;
 
-      - name: 开始编译
+      - name: 编译固件
         working-directory: ./openwrt
         run: |
           make -j$(nproc) || make -j1 V=s
 
-      - name: 上传固件产物
+      - name: 终极产物搜寻 (地毯式抓取)
+        if: always() # 即使编译中间报错也执行
+        run: |
+          mkdir -p ./artifact/
+          # 扫描所有生成的包含 ax6000 的文件，不限目录
+          find openwrt/bin/ -type f -name "*ax6000*" -exec cp {} ./artifact/ \;
+          echo "--- 搜寻到的所有固件产物如下 ---"
+          ls -R ./artifact/
+
+      - name: 上传产物
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Redmi-AX6000-ClosedSource-Firmware
-          # 路径现在包含了 openwrt 前缀
-          path: |
-            openwrt/bin/targets/mediatek/filogic/*ax6000*.ubi
-            openwrt/bin/targets/mediatek/filogic/*ax6000*.bin
+          name: AX6000-ClosedSource-Result
+          path: ./artifact/
