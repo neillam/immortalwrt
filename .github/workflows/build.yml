@@ -1,16 +1,21 @@
-name: Build ImmortalWrt for Redmi AX6000
+name: Build AX6000 Closed-Source Firmware
 
 on:
-  workflow_dispatch: # 手动触发编译
+  workflow_dispatch: # 手动点击触发
+
+env:
+  # 如果您的源码仓库不是这个，请修改为实际的仓库地址
+  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
+  REPO_BRANCH: main
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出源码
+      - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 清理磁盘空间 (防止 No space left on device)
+      - name: 彻底清理磁盘空间
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -21,7 +26,7 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      - name: 安装编译依赖
+      - name: 安装编译依赖环境
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
@@ -29,62 +34,61 @@ jobs:
             file wget libelf-dev lz4 zstd ecj fastjar java-propose-classpath
           sudo apt-get clean
 
-      - name: 更新并安装 Feeds
+      - name: 克隆源码并更新 Feeds
         run: |
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+          cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 生成 .config 配置文件
+      - name: 生成并校验 .config 配置文件
         run: |
-          # 1. 写入基础配置
+          cd openwrt
+          # 写入您的专属配置
           cat <<EOF > .config
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
-          # 核心：必须是这个 ID，不能带 -ubi
-          CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000=y
+          # 确认使用带 -ubi 后缀的设备 ID
+          CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-ubi=y
           
-          # 闭源驱动核心包
+          # 闭源 WiFi 驱动核心包
           CONFIG_PACKAGE_mtk-wifi-mt7986=y
           CONFIG_PACKAGE_kmod-mt7986-firmware=y
           CONFIG_PACKAGE_luci-app-mtkwifi=y
           
-          # 硬件加速与基础组件
-          CONFIG_PACKAGE_kmod-mtk-offload=y
+          # 中文界面与基础组件
           CONFIG_PACKAGE_luci=y
-          CONFIG_PACKAGE_luci-base=y
           CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-          
-          # 常用工具
+          CONFIG_PACKAGE_kmod-mtk-offload=y
           CONFIG_PACKAGE_curl=y
-          CONFIG_PACKAGE_htop=y
           EOF
           
-          # 2. 补全缺失依赖
+          # 补全依赖
           make defconfig
           
-          # 3. 关键校验：检查是否由于 ID 错误而回退到了默认设备
-          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000=y" .config; then
-            echo "错误：设备 ID 匹配失败！可能是源码中没有该型号或 ID 填错。"
-            echo "当前生成的 .config 目标是: $(grep CONFIG_TARGET_mediatek_filogic_DEVICE .config)"
+          # 校验是否选中了正确目标，防止 Fallback 到 openwrt_one
+          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-ubi=y" .config; then
+            echo "错误：源码中未找到该设备 ID，当前选中目标如下："
+            grep "CONFIG_TARGET_mediatek_filogic_DEVICE" .config
             exit 1
           fi
 
-      - name: 预下载源码包 (防止编译中途下载失败)
+      - name: 预下载依赖包
         run: |
+          cd openwrt
           make download -j8
-          find dl -size -1k -exec ls -l {} \;
           find dl -size -1k -exec rm -f {} \;
 
-      - name: 开始编译
+      - name: 编译固件
         run: |
-          # 采用多线程编译，如果失败自动转单线程并输出详细日志
+          cd openwrt
+          # 优先使用多线程，失败则转单线程查看详情
           make -j$(nproc) || make -j1 V=s
 
       - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
-          name: Redmi-AX6000-ImmortalWrt-Firmware
-          # 这样会上传所有的 .ubi 和 .bin 文件，包括 factory 和 sysupgrade
+          name: Redmi-AX6000-Closed-Source-Firmware
           path: |
-            bin/targets/mediatek/filogic/*.ubi
-            bin/targets/mediatek/filogic/*.bin
+            openwrt/bin/targets/mediatek/filogic/*.ubi
+            openwrt/bin/targets/mediatek/filogic/*.bin
