@@ -1,25 +1,16 @@
-name: Build ImmortalWrt for AX6000
+name: Build ImmortalWrt for Redmi AX6000
 
 on:
-  workflow_dispatch:
-    inputs:
-      target:
-        description: 'Target (e.g. mediatek/filogic)'
-        required: true
-        default: 'mediatek/filogic'
-      device:
-        description: 'Device'
-        required: true
-        default: 'xiaomi_redmi-router-ax6000-ubi'
+  workflow_dispatch: # 手动触发编译
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: 检出源码
         uses: actions/checkout@v4
 
-      - name: Free Disk Space (关键：防止磁盘空间不足)
+      - name: 清理磁盘空间 (防止 No space left on device)
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -30,7 +21,7 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      - name: Install Compilation Packages
+      - name: 安装编译依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
@@ -38,43 +29,62 @@ jobs:
             file wget libelf-dev lz4 zstd ecj fastjar java-propose-classpath
           sudo apt-get clean
 
-      - name: Update & Install Feeds
+      - name: 更新并安装 Feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Generate Configuration
+      - name: 生成 .config 配置文件
         run: |
-          # 基础硬件配置
-          echo "CONFIG_TARGET_mediatek=y" > .config
-          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${{ github.event.inputs.device }}=y" >> .config
+          # 1. 写入基础配置
+          cat <<EOF > .config
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          # 核心：必须是这个 ID，不能带 -ubi
+          CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000=y
           
-          # 闭源驱动核心包 (必须确保你的源码树里包含这些包)
-          echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
+          # 闭源驱动核心包
+          CONFIG_PACKAGE_mtk-wifi-mt7986=y
+          CONFIG_PACKAGE_kmod-mt7986-firmware=y
+          CONFIG_PACKAGE_luci-app-mtkwifi=y
           
-          # 建议增加：硬件加速 (Offloading)
-          echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
+          # 硬件加速与基础组件
+          CONFIG_PACKAGE_kmod-mtk-offload=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-base=y
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
           
-          # 补全依赖并生成最终配置
+          # 常用工具
+          CONFIG_PACKAGE_curl=y
+          CONFIG_PACKAGE_htop=y
+          EOF
+          
+          # 2. 补全缺失依赖
           make defconfig
+          
+          # 3. 关键校验：检查是否由于 ID 错误而回退到了默认设备
+          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000=y" .config; then
+            echo "错误：设备 ID 匹配失败！可能是源码中没有该型号或 ID 填错。"
+            echo "当前生成的 .config 目标是: $(grep CONFIG_TARGET_mediatek_filogic_DEVICE .config)"
+            exit 1
+          fi
 
-      - name: Download Library (预下载，提高成功率)
+      - name: 预下载源码包 (防止编译中途下载失败)
         run: |
           make download -j8
           find dl -size -1k -exec ls -l {} \;
           find dl -size -1k -exec rm -f {} \;
 
-      - name: Build Firmware
+      - name: 开始编译
         run: |
-          echo "开始编译..."
-          # 第一次编译建议使用单线程或核心数+1，防止内存溢出导致 No space 错误误报
+          # 采用多线程编译，如果失败自动转单线程并输出详细日志
           make -j$(nproc) || make -j1 V=s
-          echo "编译完成"
 
-      - name: Upload Artifact
+      - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.device }}-firmware
-          path: bin/targets/mediatek/filogic/*.ubi
+          name: Redmi-AX6000-ImmortalWrt-Firmware
+          # 这样会上传所有的 .ubi 和 .bin 文件，包括 factory 和 sysupgrade
+          path: |
+            bin/targets/mediatek/filogic/*.ubi
+            bin/targets/mediatek/filogic/*.bin
