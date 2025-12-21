@@ -2,11 +2,6 @@ name: Build AX6000 Closed-Source Firmware
 
 on:
   workflow_dispatch:
-    inputs:
-      device:
-        description: 'Device Name'
-        required: true
-        default: 'xiaomi_redmi-router-ax6000'
 
 jobs:
   build:
@@ -30,21 +25,26 @@ jobs:
             file wget libelf-dev lz4 zstd
           sudo apt-get clean
 
-      - name: 克隆源码 (直接克隆到当前目录)
+      - name: 克隆源码 (克隆到 openwrt 文件夹)
         run: |
-          # 使用 hanwckf 的分支，这是闭源驱动最稳的分支
-          git clone --depth 1 https://github.com/hanwckf/immortalwrt-mt798x -b openwrt-21.02 .
+          # 这样不会因为当前目录非空而报错
+          git clone --depth 1 https://github.com/hanwckf/immortalwrt-mt798x -b openwrt-21.02 openwrt
+
+      - name: 更新 Feeds
+        working-directory: ./openwrt
+        run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: 写入 .config 配置文件
+        working-directory: ./openwrt
         run: |
-          # 确保 ID 绝对顶格，不带任何空格
+          # 强制顶格写入正确的 ID
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
           
-          # 闭源驱动插件包
+          # 闭源无线驱动插件包
           echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
@@ -57,19 +57,21 @@ jobs:
           make defconfig
 
       - name: 预下载依赖包
+        working-directory: ./openwrt
         run: |
           make download -j8
           find dl -size -1k -exec rm -f {} \;
 
       - name: 开始编译
+        working-directory: ./openwrt
         run: |
           make -j$(nproc) || make -j1 V=s
 
-      - name: 上传固件产物 (使用最宽泛的匹配)
+      - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
-          name: Redmi-AX6000-Firmware
-          # 直接扫描整个 bin 目录，只要文件名带 ax6000 且后缀是 ubi 或 bin 的都拿走
+          name: Redmi-AX6000-ClosedSource-Firmware
+          # 路径现在包含了 openwrt 前缀
           path: |
-            bin/targets/mediatek/filogic/*ax6000*.ubi
-            bin/targets/mediatek/filogic/*ax6000*.bin
+            openwrt/bin/targets/mediatek/filogic/*ax6000*.ubi
+            openwrt/bin/targets/mediatek/filogic/*ax6000*.bin
