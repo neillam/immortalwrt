@@ -36,7 +36,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-     - name: 强制开启闭源驱动（现场取证 + 修改）
+      - name: 强制开启闭源驱动（现场取证 + 修改）
         working-directory: ./openwrt
         run: |
           # ① 现场看真相：到底在哪？
