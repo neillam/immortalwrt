@@ -1,25 +1,79 @@
-      - name: 生成 .config 配置文件 (UBI 版 AX6000)
+name: Build AX6000 Closed-Source Factory
+
+on:
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
+  REPO_BRANCH: openwrt-21.02
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 彻底清理磁盘空间
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget \
+            libelf-dev lz4 zstd
+          sudo apt-get clean
+
+      - name: 克隆源码
+        run: |
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # ====== 核心：直接改 Makefile 闭源驱动 ======
+      - name: 强制开启闭源驱动
         working-directory: ./openwrt
         run: |
-          # 1. 锁定 UBI 版设备 ID（hanwckf 仓库写法）
-          echo "CONFIG_TARGET_mediatek=y" > .config
-          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-ubi=y" >> .config
+          # 在 device 定义里追加闭源包（hanwckf 仓库特有）
+          sed -i '/define Device\/xiaomi_redmi-router-ax6000-stock/,/endef/{s/kmod-mt7986-firmware/kmod-mt7986-firmware mtk-wifi-mt7986 luci-app-mtkwifi/}' \
+            target/linux/mediatek/image/filogic.mk
 
-          # 2. 强制生成 factory.ubi + sysupgrade.ubi
-          echo "CONFIG_TARGET_ROOTFS_INITRAMFS=y" >> .config
-          echo "CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y" >> .config
-          echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
+          # 确保生成 factory.ubi
+          sed -i '/define Device\/xiaomi_redmi-router-ax6000-stock/,/endef/{s/ARTIFACTS := initramfs-factory.ubi/ARTIFACTS := initramfs-factory.ubi/}' \
+            target/linux/mediatek/image/filogic.mk
 
-          # 3. 闭源无线驱动（hanwckf 特有）
-          echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
-
-          # 4. 中文界面 & 性能
-          echo "CONFIG_PACKAGE_luci=y" >> .config
-          echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
-
-          # 5. 补全依赖
+          # 默认选 UBI 版设备
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" > .config
           make defconfig
+
+      - name: 预下载依赖包
+        working-directory: ./openwrt
+        run: |
+          make download -j8
+          find dl -size -1k -exec rm -f {} \;
+
+      - name: 编译固件
+        working-directory: ./openwrt
+        run: |
+          make -j$(nproc) || make -j1 V=s
+
+      - name: 整理并提取固件
+        if: always()
+        run: |
+          mkdir -p ./artifact/
+          # 只抓 UBI 产物
+          find openwrt/bin/targets/ -type f \( -name "*factory.ubi" -o -name "*sysupgrade.bin" \) -exec cp {} ./artifact/ \;
+          ls -lh ./artifact/
+
+      - name: 上传固件产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AX6000-ClosedSource-Factory
+          path: ./artifact/
