@@ -36,19 +36,15 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # ====== 核心：直接改 Makefile 闭源驱动 ======
-      - name: 强制开启闭源驱动
+      - name: 强制开启闭源驱动（定位 filogic.mk 并修改）
         working-directory: ./openwrt
         run: |
-          # 在 device 定义里追加闭源包（hanwckf 仓库特有）
-          sed -i '/define Device\/xiaomi_redmi-router-ax6000-stock/,/endef/{s/kmod-mt7986-firmware/kmod-mt7986-firmware mtk-wifi-mt7986 luci-app-mtkwifi/}' \
-            target/linux/mediatek/image/filogic.mk
-
+          DEVICE_FILE=target/linux/mediatek/image/filogic.mk
+          # 在 stock 定义块内追加闭源包
+          sed -i '/define Device\/xiaomi_redmi-router-ax6000-stock/,/endef/{s/kmod-mt7986-firmware/kmod-mt7986-firmware mtk-wifi-mt7986 luci-app-mtkwifi/}' "$DEVICE_FILE"
           # 确保生成 factory.ubi
-          sed -i '/define Device\/xiaomi_redmi-router-ax6000-stock/,/endef/{s/ARTIFACTS := initramfs-factory.ubi/ARTIFACTS := initramfs-factory.ubi/}' \
-            target/linux/mediatek/image/filogic.mk
-
-          # 默认选 UBI 版设备
+          sed -i '/define Device\/xiaomi_redmi-router-ax6000-stock/,/endef/{s/ARTIFACTS :=/ARTIFACTS := initramfs-factory.ubi/}' "$DEVICE_FILE"
+          # 默认选该设备
           echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" > .config
           make defconfig
 
