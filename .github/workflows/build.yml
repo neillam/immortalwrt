@@ -1,90 +1,25 @@
-name: Build AX6000 Closed-Source Factory
-
-on:
-  workflow_dispatch:
-
-env:
-  # 源码锁定 hanwckf 分支，确保闭源驱动稳定
-  REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
-  REPO_BRANCH: openwrt-21.02
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 彻底清理磁盘空间
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-
-      - name: 安装编译依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-            gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
-            file wget libelf-dev lz4 zstd
-          sudo apt-get clean
-
-      - name: 克隆源码
-        run: |
-          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
-          cd openwrt
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: 生成 .config 配置文件 (核心修正)
+      - name: 生成 .config 配置文件 (UBI 版 AX6000)
         working-directory: ./openwrt
         run: |
-          # 1. 锁定设备 ID
+          # 1. 锁定 UBI 版设备 ID（hanwckf 仓库写法）
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
-          
-          # 2. 【极其重要】开启生成 factory.ubi 的核心开关
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-ubi=y" >> .config
+
+          # 2. 强制生成 factory.ubi + sysupgrade.ubi
           echo "CONFIG_TARGET_ROOTFS_INITRAMFS=y" >> .config
           echo "CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y" >> .config
-          
-          # 3. 闭源无线驱动与插件
+          echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
+
+          # 3. 闭源无线驱动（hanwckf 特有）
           echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
-          
-          # 4. 界面与性能优化
+
+          # 4. 中文界面 & 性能
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
           echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
-          
-          # 5. 补全配置
+
+          # 5. 补全依赖
           make defconfig
-
-      - name: 预下载依赖包
-        working-directory: ./openwrt
-        run: |
-          make download -j8
-          find dl -size -1k -exec rm -f {} \;
-
-      - name: 编译固件
-        working-directory: ./openwrt
-        run: |
-          make -j$(nproc) || make -j1 V=s
-
-      - name: 整理并提取固件
-        if: always()
-        run: |
-          mkdir -p ./artifact/
-          # 扫描生成的 factory.ubi 和 sysupgrade.bin
-          find openwrt/bin/targets/ -type f -name "*ax6000*" -exec cp {} ./artifact/ \;
-          echo "--- 搜寻到的产物列表 ---"
-          ls -R ./artifact/
-
-      - name: 上传固件产物
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Redmi-AX6000-Factory-Result
-          path: ./artifact/
