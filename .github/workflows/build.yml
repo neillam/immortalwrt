@@ -1,10 +1,10 @@
-name: Build AX6000 Closed-Source Final
+name: Build AX6000 Final Solution
 
 on:
   workflow_dispatch:
 
 env:
-  # 源码锁定 hanwckf 分支，确保闭源驱动稳定
+  # 源码锁定为 hanwckf 的 21.02 分支，这是支持闭源驱动最稳的版本
   REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
   REPO_BRANCH: openwrt-21.02
 
@@ -30,38 +30,41 @@ jobs:
             file wget libelf-dev lz4 zstd
           sudo apt-get clean
 
-      - name: 克隆源码
+      - name: 克隆源码并更新 Feeds
         run: |
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 强制生成 .config 配置文件
+      - name: 生成配置并强制校验 (写法大改)
         working-directory: ./openwrt
         run: |
-          # 1. 核心：ID 必须完全匹配您查到的 DTS 文件名 (带 -stock)
-          echo "CONFIG_TARGET_mediatek=y" > .config
-          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" >> .config
+          # 1. 强制写入顶格配置
+          cat <<EOF > .config
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y
+          CONFIG_PACKAGE_mtk-wifi-mt7986=y
+          CONFIG_PACKAGE_kmod-mt7986-firmware=y
+          CONFIG_PACKAGE_luci-app-mtkwifi=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          CONFIG_PACKAGE_kmod-mtk-offload=y
+          CONFIG_PACKAGE_curl=y
+          CONFIG_PACKAGE_htop=y
+          EOF
           
-          # 2. 闭源驱动核心组件
-          echo "CONFIG_PACKAGE_mtk-wifi-mt7986=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-mtkwifi=y" >> .config
-          
-          # 3. 硬件加速与中文语言包
-          echo "CONFIG_PACKAGE_kmod-mtk-offload=y" >> .config
-          echo "CONFIG_PACKAGE_luci=y" >> .config
-          echo "CONFIG_PACKAGE_luci-base=y" >> .config
-          echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
-          
-          # 4. 其它必要工具
-          echo "CONFIG_PACKAGE_curl=y" >> .config
-          echo "CONFIG_PACKAGE_htop=y" >> .config
-          
-          # 补全所有依赖，此时不应出现 openwrt_one 或 spim-nor 的回退提示
+          # 2. 补全依赖
           make defconfig
+          
+          # 3. 关键：强校验逻辑。如果没选中 ax6000-stock，立刻报错停止，不浪费时间。
+          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" .config; then
+            echo "错误：编译系统拒绝了 AX6000-Stock 配置，回退到了默认设备！"
+            echo "当前配置中的实际设备是："
+            grep "CONFIG_TARGET_mediatek_filogic_DEVICE_" .config
+            exit 1
+          fi
 
       - name: 预下载依赖包
         working-directory: ./openwrt
@@ -72,23 +75,21 @@ jobs:
       - name: 编译固件
         working-directory: ./openwrt
         run: |
-          # 优先多线程
+          # 优先并行编译
           make -j$(nproc) || make -j1 V=s
 
-      - name: 整理并搜寻 NAND 产物
+      - name: 搜寻并整理 NAND 产物
         if: always()
         run: |
           mkdir -p ./artifact/
-          # 专门寻找带 ax6000 且符合 NAND 布局的镜像
-          find openwrt/bin/targets/ -type f -name "*ax6000*.ubi" -exec cp {} ./artifact/ \;
-          find openwrt/bin/targets/ -type f -name "*ax6000*sysupgrade.bin" -exec cp {} ./artifact/ \;
-          # 打印列表，确认是否有 factory.ubi
+          # 扫描所有生成的带 ax6000 字样的文件
+          find openwrt/bin/targets/ -type f -name "*ax6000*" -exec cp {} ./artifact/ \;
           echo "--- 搜寻到的产物列表如下 ---"
           ls -R ./artifact/
 
-      - name: 上传固件产物
+      - name: 上传固件
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AX6000-ClosedSource-NAND-Result
+          name: AX6000-Final-Result
           path: ./artifact/
