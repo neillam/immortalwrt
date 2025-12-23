@@ -36,24 +36,33 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 强制开启闭源驱动（改 mt7986.mk）
+      # ====== 核心：零补丁错误 + 零 sed 错 ======
+      - name: 强制开启闭源驱动（最终修复版）
         working-directory: ./openwrt
         run: |
-          # 确认文件存在
-          DEVICE_FILE=target/linux/mediatek/image/mt7986.mk
-          if [ ! -f "$DEVICE_FILE" ]; then
-            echo "❌ 找不到 $DEVICE_FILE"
+          # ① 21.02 强制要求：generic/patches → pending
+          if [ -d target/linux/generic/patches ]; then
+            echo "⚠️ 发现 generic/patches，自动搬到 pending/"
+            mkdir -p target/linux/generic/pending
+            mv target/linux/generic/patches/* target/linux/generic/pending/ 2>/dev/null || true
+            rmdir target/linux/generic/patches 2>/dev/null || true
+          fi
+
+          # ② 自动定位 device 文件（不再硬编码）
+          DEVICE_FILE=$(find target/linux/mediatek/image -name "*.mk" -exec grep -l "xiaomi_redmi-router-ax6000-stock" {} \; | head -1)
+          if [ -z "$DEVICE_FILE" ]; then
+            echo "❌ 找不到 device 文件"
             exit 1
           fi
           echo "✅ 找到：$DEVICE_FILE"
 
-          # 在 xiaomi_redmi-router-ax6000-stock 定义块内追加闭源包
-          sed -i '/define Device\/xiaomi_redmi-router-ax6000-stock/,/endef/{s/kmod-mt7986-firmware/kmod-mt7986-firmware mtk-wifi-mt7986 luci-app-mtkwifi/}' "$DEVICE_FILE"
+          # ③ 直接 echo 追加闭源包（零 sed 语法错）
+          echo "  DEVICE_PACKAGES += mtk-wifi-mt7986 kmod-mt7986-firmware luci-app-mtkwifi" >> "$DEVICE_FILE"
 
-          # 确保生成 factory.ubi
-          sed -i '/define Device\/xiaomi_redmi-router-ax6000-stock/,/endef/{s/ARTIFACTS :=/ARTIFACTS := initramfs-factory.ubi/}' "$DEVICE_FILE"
+          # ④ 确保生成 factory.ubi
+          echo "  ARTIFACTS += initramfs-factory.ubi" >> "$DEVICE_FILE"
 
-          # 默认选该设备
+          # ⑤ 默认选该设备
           echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" > .config
           make defconfig
 
