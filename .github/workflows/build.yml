@@ -66,12 +66,39 @@ jobs:
           echo "CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y" > .config
           make defconfig
 
+      - name: 删除失败补丁（避免 Hunk FAILED）
+        working-directory: ./openwrt"
+        run: |
+          ...（上面脚本）...
+
+      - name: 预下载依赖包
+        working-directory: ./openwrt
+        run: |
+          make download -j8
+          ...
+          
       - name: 预下载依赖包
         working-directory: ./openwrt
         run: |
           make download -j8
           find dl -size -1k -exec rm -f {} \;
 
+      - name: 删除失败补丁（避免 Hunk FAILED）
+        working-directory: ./openwrt
+        run: |
+          # 找到失败补丁并删除（hanwckf 仓库特有）
+          PATCH_FILE=target/linux/x86/patches-5.4/120-hwrng-geode-fix-accessing-registers.patch
+          if [ -f "$PATCH_FILE" ]; then
+            echo "⚠️ 删除失败补丁：$PATCH_FILE"
+            rm -f "$PATCH_FILE"
+          fi
+
+          # 如果存在整个 pending 目录冲突也清掉
+          if [ -d target/linux/x86/patches-5.4 ]; then
+            find target/linux/x86/patches-5.4 -name "*.rej" -delete
+            find target/linux/x86/patches-5.4 -name "*.orig" -delete
+          fi
+          
       - name: 编译固件
         working-directory: ./openwrt
         run: |
