@@ -36,7 +36,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-            - name: 强制开启闭源驱动（改 mt7986.mk）
+      - name: 强制开启闭源驱动（改 mt7986.mk）
         working-directory: ./openwrt
         run: |
           # 确认文件存在
