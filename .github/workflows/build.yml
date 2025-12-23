@@ -90,12 +90,15 @@ jobs:
         run: |
           make -j$(nproc) || make -j1 V=s
 
-      - name: 整理并提取固件
+      - name: 整理并提取固件（现场取证版）
         if: always()
         run: |
           mkdir -p ./artifact/
-          # 只抓 UBI 产物
-          find openwrt/bin/targets/ -type f \( -name "*factory.ubi" -o -name "*sysupgrade.bin" \) -exec cp {} ./artifact/ \;
+          echo "===== 现场目录 ====="
+          find openwrt/bin -type f -name "*.ubi" -o -name "*.bin" | sort
+          echo "===== 复制到 artifact ====="
+          # 万能抓取：任何 .ubi/.bin 都拷走
+          find openwrt/bin -type f \( -name "*.ubi" -o -name "*.bin" \) -exec cp {} ./artifact/ \;
           ls -lh ./artifact/
 
       - name: 上传固件产物
