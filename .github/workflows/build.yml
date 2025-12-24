@@ -36,44 +36,41 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 强制开启闭源驱动（锁死 ARM64）
+      - name: 强制开启闭源驱动（锁死 Stock 设备）
         working-directory: ./openwrt
         run: |
-            # ① 21.02 强制要求：generic/patches → pending
-            if [ -d target/linux/generic/patches ]; then
-              echo "⚠️ 发现 generic/patches，自动搬到 pending/"
-              mkdir -p target/linux/generic/pending
-              mv target/linux/generic/patches/* target/linux/generic/pending/ 2>/dev/null || true
-              rmdir target/linux/generic/patches 2>/dev/null || true
-            fi
-  
-            # ② 自动定位 device 文件
-            DEVICE_FILE=$(find target/linux/mediatek/image -name "*.mk" -exec grep -l "xiaomi_redmi-router-ax6000-stock" {} \; | head -1)
-            if [ -z "$DEVICE_FILE" ]; then
-              echo "❌ 找不到 device 文件"
-              exit 1
-            fi
-            echo "✅ 找到：$DEVICE_FILE"
-  
-            # ③ 追加闭源包
-            echo "  DEVICE_PACKAGES += mtk-wifi-mt7986 kmod-mt7986-firmware luci-app-mtkwifi" >> "$DEVICE_FILE"
-            echo "  ARTIFACTS += initramfs-factory.ubi" >> "$DEVICE_FILE"
-  
-            # ④ 锁死 ARM64 + MTK + 设备（防止 defconfig 覆盖成 x86）
-            cat > .config << 'EOF'
-            CONFIG_TARGET_mediatek=y
-            CONFIG_TARGET_mediatek_filogic=y
-            CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi-redmi-router-ax6000-stock=y
-            CONFIG_TARGET_ROOTFS_INITRAMFS=y
-            CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y
-            CONFIG_TARGET_ROOTFS_SQUASHFS=y
-            CONFIG_PACKAGE_mtk-wifi-mt7986=y
-            CONFIG_PACKAGE_kmod-mt7986-firmware=y
-            CONFIG_PACKAGE_luci-app-mtkwifi=y
-            CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-            CONFIG_PACKAGE_kmod-mtk-offload=y
-            EOF
-            make defconfig
+          # ① 21.02 强制要求：generic/patches → pending
+          if [ -d target/linux/generic/patches ]; then
+            mkdir -p target/linux/generic/pending
+            mv target/linux/generic/patches/* target/linux/generic/pending/ 2>/dev/null || true
+            rmdir target/linux/generic/patches 2>/dev/null || true
+          fi
+
+          # ② 自动定位 device 文件
+          DEVICE_FILE=$(find target/linux/mediatek/image -name "*.mk" -exec grep -l "xiaomi_redmi-router-ax6000-stock" {} \; | head -1)
+
+          # ③ 追加闭源包
+          echo "  DEVICE_PACKAGES += mtk-wifi-mt7986 kmod-mt7986-firmware luci-app-mtkwifi" >> "$DEVICE_FILE"
+          echo "  ARTIFACTS += initramfs-factory.ubi" >> "$DEVICE_FILE"
+
+          # ④ 锁死 ARM64 + Stock 设备（防 defconfig 覆盖成 RFB/x86）
+          cat > .config << 'EOF'
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y
+          CONFIG_TARGET_ROOTFS_INITRAMFS=y
+          CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          CONFIG_PACKAGE_mtk-wifi-mt7986=y
+          CONFIG_PACKAGE_kmod-mt7986-firmware=y
+          CONFIG_PACKAGE_luci-app-mtkwifi=y
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          CONFIG_PACKAGE_kmod-mtk-offload=y
+          CONFIG_STRIP_KERNEL_EXPORTS=y
+          CONFIG_USE_MKLIBS=y
+          EOF
+
+          make defconfig
             
       - name: 删除失败补丁（避免 Hunk FAILED）
         working-directory: ./openwrt
