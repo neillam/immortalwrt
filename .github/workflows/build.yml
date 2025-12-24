@@ -71,6 +71,7 @@ jobs:
           EOF
 
           make defconfig
+          grep "CONFIG_TARGET.*DEVICE" .config
             
       - name: 删除失败补丁（避免 Hunk FAILED）
         working-directory: ./openwrt
