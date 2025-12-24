@@ -63,7 +63,7 @@ jobs:
             cat > .config << 'EOF'
             CONFIG_TARGET_mediatek=y
             CONFIG_TARGET_mediatek_filogic=y
-            CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y
+            CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi-redmi-router-ax6000-stock=y
             CONFIG_TARGET_ROOTFS_INITRAMFS=y
             CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y
             CONFIG_TARGET_ROOTFS_SQUASHFS=y
