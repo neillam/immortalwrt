@@ -36,24 +36,17 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 强制开启闭源驱动（锁死 Stock 设备）
+      - name: 强制开启闭源驱动（锁死 ARM64）
         working-directory: ./openwrt
         run: |
-          # ① 21.02 强制要求：generic/patches → pending
+          # 21.02 强制要求：generic/patches → pending
           if [ -d target/linux/generic/patches ]; then
             mkdir -p target/linux/generic/pending
             mv target/linux/generic/patches/* target/linux/generic/pending/ 2>/dev/null || true
             rmdir target/linux/generic/patches 2>/dev/null || true
           fi
 
-          # ② 自动定位 device 文件
-          DEVICE_FILE=$(find target/linux/mediatek/image -name "*.mk" -exec grep -l "xiaomi_redmi-router-ax6000-stock" {} \; | head -1)
-
-          # ③ 追加闭源包
-          echo "  DEVICE_PACKAGES += mtk-wifi-mt7986 kmod-mt7986-firmware luci-app-mtkwifi" >> "$DEVICE_FILE"
-          echo "  ARTIFACTS += initramfs-factory.ubi" >> "$DEVICE_FILE"
-
-          # ④ 锁死 ARM64 + Stock 设备（防 defconfig 覆盖成 RFB/x86）
+          # 锁死 ARM64 + Stock 设备 + 闭源驱动
           cat > .config << 'EOF'
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
@@ -69,20 +62,15 @@ jobs:
           CONFIG_STRIP_KERNEL_EXPORTS=y
           CONFIG_USE_MKLIBS=y
           EOF
-
           make defconfig
-          grep "CONFIG_TARGET.*DEVICE" .config
-            
-      - name: 删除失败补丁（避免 Hunk FAILED）
+
+      - name: 删除失败补丁
         working-directory: ./openwrt
         run: |
-          # 找到失败补丁并删除（hanwckf 仓库特有）
           PATCH_FILE=target/linux/x86/patches-5.4/120-hwrng-geode-fix-accessing-registers.patch
           if [ -f "$PATCH_FILE" ]; then
-            echo "⚠️ 删除失败补丁：$PATCH_FILE"
             rm -f "$PATCH_FILE"
           fi
-          # 清理 rej/orig
           find target/linux/x86/patches-5.4 -name "*.rej" -delete 2>/dev/null || true
           find target/linux/x86/patches-5.4 -name "*.orig" -delete 2>/dev/null || true
 
@@ -92,19 +80,18 @@ jobs:
           make download -j8
           find dl -size -1k -exec rm -f {} \;
 
-      - name: 编译固件
+      - name: 编译固件（单线程准备内核 + 并行编译）
         working-directory: ./openwrt
         run: |
+          # 核心修复：先 prepare 确保 symtab.h 生成
+          make target/linux/prepare V=s
+          # 再并行编译
           make -j$(nproc) || make -j1 V=s
 
-      - name: 整理并提取固件（现场取证版）
+      - name: 整理并提取固件
         if: always()
         run: |
           mkdir -p ./artifact/
-          echo "===== 现场目录 ====="
-          find openwrt/bin -type f -name "*.ubi" -o -name "*.bin" | sort
-          echo "===== 复制到 artifact ====="
-          # 万能抓取：任何 .ubi/.bin 都拷走
           find openwrt/bin -type f \( -name "*.ubi" -o -name "*.bin" \) -exec cp {} ./artifact/ \;
           ls -lh ./artifact/
 
