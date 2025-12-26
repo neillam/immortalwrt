@@ -11,7 +11,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v4
 
       - name: 彻底清理磁盘空间
         uses: jlumbroso/free-disk-space@main
@@ -36,43 +37,33 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 强制开启闭源驱动（锁死 ARM64）
+      - name: 生成 .config 配置文件 (修正版)
         working-directory: ./openwrt
         run: |
-          # 21.02 强制要求：generic/patches → pending
-          if [ -d target/linux/generic/patches ]; then
-            mkdir -p target/linux/generic/pending
-            mv target/linux/generic/patches/* target/linux/generic/pending/ 2>/dev/null || true
-            rmdir target/linux/generic/patches 2>/dev/null || true
-          fi
-
-          # 锁死 ARM64 + Stock 设备 + 闭源驱动
+          # 仅保留最核心、最稳固的配置
           cat > .config << 'EOF'
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
           CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_redmi-router-ax6000-stock=y
+          
+          # 开启工厂包 factory.ubi 生成逻辑
           CONFIG_TARGET_ROOTFS_INITRAMFS=y
           CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y
-          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          
+          # 闭源驱动核心组件
           CONFIG_PACKAGE_mtk-wifi-mt7986=y
           CONFIG_PACKAGE_kmod-mt7986-firmware=y
           CONFIG_PACKAGE_luci-app-mtkwifi=y
+          
+          # 中文界面与基础优化
+          CONFIG_PACKAGE_luci=y
           CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
           CONFIG_PACKAGE_kmod-mtk-offload=y
-          CONFIG_STRIP_KERNEL_EXPORTS=y
-          CONFIG_USE_MKLIBS=y
+          
+          # ！！！删除之前导致报错的 STRIP_KERNEL 选项 ！！！
           EOF
+          
           make defconfig
-
-      - name: 删除失败补丁
-        working-directory: ./openwrt
-        run: |
-          PATCH_FILE=target/linux/x86/patches-5.4/120-hwrng-geode-fix-accessing-registers.patch
-          if [ -f "$PATCH_FILE" ]; then
-            rm -f "$PATCH_FILE"
-          fi
-          find target/linux/x86/patches-5.4 -name "*.rej" -delete 2>/dev/null || true
-          find target/linux/x86/patches-5.4 -name "*.orig" -delete 2>/dev/null || true
 
       - name: 预下载依赖包
         working-directory: ./openwrt
@@ -80,19 +71,21 @@ jobs:
           make download -j8
           find dl -size -1k -exec rm -f {} \;
 
-      - name: 编译固件（单线程准备内核 + 并行编译）
+      - name: 编译固件
         working-directory: ./openwrt
         run: |
-          # 核心修复：先 prepare 确保 symtab.h 生成
-          make target/linux/prepare V=s
-          # 再并行编译
+          # 关键：由于 21.02 源码较老，内核部分先用单线程跑，防止 symtab.h 报错
+          make target/linux/compile -j1 V=s || make target/linux/compile -j1 V=s
+          
+          # 内核编译通过后，剩余部分全力多线程编译
           make -j$(nproc) || make -j1 V=s
 
       - name: 整理并提取固件
         if: always()
         run: |
           mkdir -p ./artifact/
-          find openwrt/bin -type f \( -name "*.ubi" -o -name "*.bin" \) -exec cp {} ./artifact/ \;
+          # 专门寻找红米 AX6000 对应的文件
+          find openwrt/bin/targets/mediatek/filogic/ -type f -name "*ax6000*" -exec cp {} ./artifact/ \;
           ls -lh ./artifact/
 
       - name: 上传固件产物
